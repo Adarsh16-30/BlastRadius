@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(go:*)",
+      "Bash(gofmt:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(govulncheck:*)",
+      "Bash(shellcheck:*)",
+      "Bash(hadolint:*)",
+      "Bash(k6:*)",
+      "Bash(jq:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)",
+      "Bash(docker stats:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "deny": [
+      "Bash(sudo:*)",
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)",
+      "Bash(docker system:*)",
+      "Bash(docker volume:*)",
+      "Bash(docker run:*)"
+    ]
+  },
+  "enabledPlugins": {
+    "ponytail@ponytail": true
+  }
+}
