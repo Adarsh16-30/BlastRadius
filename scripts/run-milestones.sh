@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 source scripts/models.conf
+MCP_FLAGS="--strict-mcp-config --mcp-config scripts/mcp-none.json"
 ALL=(M0 M1 M2 M3 M4 M5 M6 M7)
 FROM=${1:-M0}; TO=${2:-M7}; MAX_TRIES=${MAX_TRIES:-3}
 
@@ -21,7 +22,7 @@ git switch build/auto 2>/dev/null || git switch -c build/auto
 
 # Preflight: every model in the ladder must answer before we start.
 for t in "${LADDER[@]}"; do
-  claude -p "Reply with the single word OK." --model "${ID[$t]}" --output-format json \
+  claude -p "Reply with the single word OK." --model "${ID[$t]}" $MCP_FLAGS --output-format json \
     > ".autorun/preflight-$t.json" 2>&1 \
     || { echo "Preflight failed for ${ID[$t]} (see .autorun/preflight-$t.json)" >&2; exit 1; }
 done
@@ -47,7 +48,7 @@ You are running unattended. Milestone $m of docs/PRD.md section 11; attempt $try
 6. Append a handoff to docs/PROGRESS.md, then commit with a message starting "$m:". Leave the working tree clean.
 PROMPT_EOF
 )
-    claude -p "$PROMPT" --model "$MODEL" --permission-mode acceptEdits --max-turns 150 --output-format json \
+    claude -p "$PROMPT" --model "$MODEL" $MCP_FLAGS --permission-mode acceptEdits --max-turns 150 --output-format json \
       > ".autorun/$m-$try.json" 2> ".autorun/$m-$try.err" || echo "claude exited non-zero (see .autorun/$m-$try.err)" >&2
     if scripts/gate.sh "$m" > ".autorun/$m-$try.gate" 2>&1; then passed=1; break; fi
     tail -5 ".autorun/$m-$try.gate"
