@@ -1,0 +1,86 @@
+# M0 skeleton. Every service runs a pinned busybox placeholder; the target image is
+# named in each comment and swapped in by the milestone that owns it.
+# Target versions come from a web search and are NOT yet verified against registries
+# (see docs/QUESTIONS.md); verify against official docs before swapping them in.
+name: blastradius
+
+x-base: &base
+  image: busybox:1.37.0
+  command: ["sleep", "infinity"]
+  user: "65534:65534"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "true"] # shortcut: placeholder check, real per-service checks arrive with real images
+    interval: 10s
+    timeout: 3s
+    retries: 3
+
+services:
+  haproxy: # target: haproxy 3.4.7 (LTS)
+    <<: *base
+    ports: ["127.0.0.1:8080:8080"]
+    mem_limit: 32m
+    mem_reservation: 16m
+    pids_limit: 64
+  api1: # target: ghcr.io/adarsh16-30/blastradius-api (M1)
+    <<: *base
+    mem_limit: 64m
+    mem_reservation: 32m
+    pids_limit: 64
+  api2:
+    <<: *base
+    mem_limit: 64m
+    mem_reservation: 32m
+    pids_limit: 64
+  toxiproxy: # target: ghcr.io/shopify/toxiproxy 2.x
+    <<: *base
+    mem_limit: 32m
+    mem_reservation: 16m
+    pids_limit: 64
+  pg1: # target: custom postgres:17 + repmgr + pgBackRest (M2)
+    <<: *base
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 128
+  pg2:
+    <<: *base
+    mem_limit: 256m
+    mem_reservation: 128m
+    pids_limit: 128
+  prometheus: # target: prom/prometheus 3.15.1
+    <<: *base
+    mem_limit: 160m
+    mem_reservation: 96m
+    pids_limit: 64
+  grafana: # target: grafana/grafana-oss 13.3.0
+    <<: *base
+    ports: ["127.0.0.1:3000:3000"]
+    mem_limit: 192m
+    mem_reservation: 96m
+    pids_limit: 64
+  dockerproxy: # target: tecnativa/docker-socket-proxy (socket mounted read-only in M4)
+    <<: *base
+    mem_limit: 32m
+    mem_reservation: 16m
+    pids_limit: 64
+  cloudflared: # target: cloudflare/cloudflared, Quick Tunnel
+    <<: *base
+    profiles: [public]
+    mem_limit: 48m
+    mem_reservation: 24m
+    pids_limit: 64
+  blast: # target: ghcr.io/adarsh16-30/blastradius-blast (M4)
+    <<: *base
+    profiles: [chaos]
+    mem_limit: 64m
+    mem_reservation: 32m
+    pids_limit: 64
+  k6: # target: grafana/k6 2.1.0
+    <<: *base
+    profiles: [chaos]
+    mem_limit: 128m
+    mem_reservation: 64m
+    pids_limit: 64

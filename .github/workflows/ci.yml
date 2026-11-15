@@ -1,0 +1,21 @@
+name: ci
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # shortcut: actions pinned by major tag, not commit SHA (PRD 9); SHAs could not be
+      # resolved offline in M0. Pin them in M7 with the security-reviewer pass.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.4"
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+      - run: go test -race -cover ./...
+      - run: docker compose -f deploy/compose.yaml --env-file .env.example config --quiet
