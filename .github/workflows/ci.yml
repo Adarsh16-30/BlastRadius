@@ -29,4 +29,6 @@ jobs:
           version: v2.15.0
       - run: go test -race -cover ./...
       - run: docker build -f deploy/api/Dockerfile -t blastradius-api:ci .
+      - run: docker build -t blastradius-postgres:ci deploy/postgres
+      - run: shellcheck deploy/postgres/entrypoint.sh scripts/pgstatus.sh scripts/smoke.sh
       - run: docker compose -f deploy/compose.yaml --env-file .env.example config --quiet

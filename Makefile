@@ -2,7 +2,7 @@ COMPOSE := docker compose -f deploy/compose.yaml --env-file $(or $(wildcard .env
 COMPOSE_PROJECT := blastradius
 GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint),$(shell go env GOPATH)/bin/golangci-lint)
 
-.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest
+.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest pgstatus
 
 up:
 	$(COMPOSE) up -d --wait
@@ -30,13 +30,19 @@ restore-drill:
 stats:
 	docker stats --no-stream
 
-# Integration tests against the running pg1 (needs `make up`). Uses a separate blastradius_test
+# Role and replica lag of both Postgres nodes through a SQL probe; fails unless exactly one primary.
+pgstatus:
+	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) bash scripts/pgstatus.sh
+
+# Integration tests against the running primary (needs `make up`). Uses a separate blastradius_test
 # database and the container's bridge IP, so no extra port is published (PRD 9).
 itest:
 	set -a; . ./.env; set +a; \
-	ip=$$(docker inspect $(COMPOSE_PROJECT)-pg1-1 | jq -r '.[0].NetworkSettings.Networks[].IPAddress'); \
-	docker exec $(COMPOSE_PROJECT)-pg1-1 psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='blastradius_test'" | grep -q 1 || \
-	  docker exec $(COMPOSE_PROJECT)-pg1-1 psql -U postgres -c 'CREATE DATABASE blastradius_test'; \
+	pg=$(COMPOSE_PROJECT)-pg1-1; \
+	[ "$$(docker exec $$pg psql -XAtU postgres -c 'SELECT pg_is_in_recovery()')" = f ] || pg=$(COMPOSE_PROJECT)-pg2-1; \
+	ip=$$(docker inspect $$pg | jq -r '.[0].NetworkSettings.Networks[].IPAddress'); \
+	docker exec $$pg psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='blastradius_test'" | grep -q 1 || \
+	  docker exec $$pg psql -U postgres -c 'CREATE DATABASE blastradius_test'; \
 	TEST_DATABASE_URL="postgres://postgres:$$POSTGRES_PASSWORD@$$ip:5432/blastradius_test" go test -race -cover -count=1 ./...
 
 smoke:

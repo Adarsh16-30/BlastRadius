@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,16 +70,18 @@ func healthcheck() error {
 	return nil
 }
 
-// migrate connects straight to MIGRATE_DB_HOST (one host:port), as the migrator role.
+// migrate connects straight to MIGRATE_DB_HOST (host:port[,host:port]) as the migrator role;
+// with several hosts the read-write one is used, so it still works after a failover.
 func migrate(log *slog.Logger) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	cfg := store.Config{
-		Hosts: []string{os.Getenv("MIGRATE_DB_HOST")}, Name: orDefault(os.Getenv("DB_NAME"), "blastradius"),
+		Hosts: strings.Split(os.Getenv("MIGRATE_DB_HOST"), ","), Name: orDefault(os.Getenv("DB_NAME"), "blastradius"),
 		User: os.Getenv("MIGRATE_DB_USER"), Password: os.Getenv("MIGRATE_DB_PASSWORD"),
 	}
-	if err := validHostPort(cfg.Hosts[0]); err != nil || cfg.User == "" || cfg.Password == "" {
-		return errors.New("MIGRATE_DB_HOST (host:port), MIGRATE_DB_USER and MIGRATE_DB_PASSWORD are required")
+	badHost := func(h string) bool { return validHostPort(h) != nil }
+	if slices.ContainsFunc(cfg.Hosts, badHost) || cfg.User == "" || cfg.Password == "" {
+		return errors.New("MIGRATE_DB_HOST (host:port[,host:port]), MIGRATE_DB_USER and MIGRATE_DB_PASSWORD are required")
 	}
 	conn, err := pgx.Connect(ctx, cfg.DSN("read-write"))
 	if err != nil {

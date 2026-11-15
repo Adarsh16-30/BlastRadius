@@ -1,8 +1,8 @@
 # Services not yet built still run a pinned busybox placeholder; the target image is
 # named in each comment and swapped in by the milestone that owns it.
-# M1 swapped in real images for haproxy, api1/api2, toxiproxy, pg1 and k6. Tags were each
-# checked with `docker manifest inspect` on 2026-11-15:
-#   postgres:17.9-alpine3.23  haproxy:3.4.7-alpine3.24  ghcr.io/shopify/toxiproxy:2.13.0
+# M1 swapped in real images for haproxy, api1/api2, toxiproxy and k6; M2 for pg1/pg2. Tags were
+# each checked with `docker manifest inspect` on 2026-11-15:
+#   postgres:17.9-bookworm (deploy/postgres/Dockerfile)  haproxy:3.4.7-alpine3.24  ghcr.io/shopify/toxiproxy:2.13.0
 #   grafana/k6:2.4.0          golang:1.27.4-alpine3.24 (API builder, deploy/api/Dockerfile)
 # Placeholder targets (prometheus, grafana, ...) are still unverified (docs/QUESTIONS.md).
 name: blastradius
@@ -49,6 +49,34 @@ x-api: &api
   mem_reservation: 32m
   pids_limit: 64
 
+# One image for both nodes (deploy/postgres); they differ only by environment (PRD 6.4).
+# Base postgres:17.9-bookworm verified with `docker manifest inspect` on 2026-11-15.
+x-pg: &pg
+  <<: *base
+  image: ghcr.io/adarsh16-30/blastradius-postgres:dev
+  build:
+    context: ./postgres
+  command: []
+  user: "999:999" # postgres uid in the Debian image
+  stop_grace_period: 30s # entrypoint runs `pg_ctl stop -m fast` on SIGTERM
+  tmpfs: ["/tmp:size=16m", "/run/postgresql:size=1m"]
+  healthcheck: # /tmp/ready: roles exist and the node is registered with repmgr
+    test: ["CMD-SHELL", "test -f /tmp/ready && pg_isready -q -h 127.0.0.1 -d blastradius"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 60s
+  mem_limit: 256m
+  mem_reservation: 128m
+  pids_limit: 128
+
+x-pg-env: &pg-env
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  REPMGR_PASSWORD: ${REPMGR_PASSWORD:?set REPMGR_PASSWORD in .env}
+  APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+  MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?set MIGRATOR_PASSWORD in .env}
+  PROBE_PASSWORD: ${PROBE_PASSWORD:?set PROBE_PASSWORD in .env}
+
 services:
   haproxy:
     <<: *base
@@ -77,7 +105,8 @@ services:
     command: ["migrate"]
     restart: "no"
     environment:
-      MIGRATE_DB_HOST: pg1:5432 # direct, not via Toxiproxy: faults must not hit migrations
+      # Direct, not via Toxiproxy: faults must not hit migrations. The read-write node is used.
+      MIGRATE_DB_HOST: pg1:5432,pg2:5432
       MIGRATE_DB_USER: migrator
       MIGRATE_DB_PASSWORD: ${MIGRATOR_PASSWORD:?set MIGRATOR_PASSWORD in .env}
       DB_NAME: blastradius
@@ -85,6 +114,7 @@ services:
       test: ["CMD", "/api", "version"] # shortcut: exits immediately, the check only satisfies the every-service rule
     depends_on:
       pg1: { condition: service_healthy }
+      pg2: { condition: service_healthy }
     mem_limit: 32m
     mem_reservation: 16m
   toxiproxy:
@@ -101,45 +131,27 @@ services:
     mem_limit: 32m
     mem_reservation: 16m
     pids_limit: 64
-  pg1: # M2 replaces this with the repmgr + pgBackRest image
-    <<: *base
-    image: postgres:17.9-alpine3.23
-    command:
-      - postgres
-      - -c
-      - shared_buffers=32MB
-      - -c
-      - work_mem=2MB
-      - -c
-      - maintenance_work_mem=16MB
-      - -c
-      - max_connections=30
-    user: "70:70" # postgres uid in the alpine image; volume ownership comes from the image
+  pg1:
+    <<: *pg
     environment:
-      POSTGRES_DB: blastradius
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_INITDB_ARGS: --data-checksums
-      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
-      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?set MIGRATOR_PASSWORD in .env}
-      PROBE_PASSWORD: ${PROBE_PASSWORD:?set PROBE_PASSWORD in .env}
-    volumes:
-      - pg1-data:/var/lib/postgresql/data
-      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro
-    tmpfs: ["/tmp", "/var/run/postgresql"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d blastradius"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 15s
-    mem_limit: 256m
-    mem_reservation: 128m
-    pids_limit: 128
-  pg2: # target: same custom image as pg1 (M2)
-    <<: *base
-    mem_limit: 256m
-    mem_reservation: 128m
-    pids_limit: 128
+      <<: *pg-env
+      NODE_ID: "1"
+      NODE_NAME: pg1
+      PEER_HOST: pg2
+      PG_ROLE: primary
+    volumes: ["pg1-data:/var/lib/postgresql/data"]
+  pg2:
+    <<: *pg
+    environment:
+      <<: *pg-env
+      NODE_ID: "2"
+      NODE_NAME: pg2
+      PEER_HOST: pg1
+      PG_ROLE: standby
+    volumes: ["pg2-data:/var/lib/postgresql/data"]
+    # Start order is the tie-break when both nodes boot together and neither is a standby.
+    depends_on:
+      pg1: { condition: service_healthy }
   prometheus: # target: prom/prometheus 3.15.1
     <<: *base
     mem_limit: 160m
@@ -190,3 +202,11 @@ services:
 
 volumes:
   pg1-data:
+  pg2-data:
+
+# Fixed subnet so deploy/postgres/pg_hba.conf can allow exactly this network (PRD 9).
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24

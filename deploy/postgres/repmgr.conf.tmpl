@@ -1,0 +1,21 @@
+# repmgr 5.5.0. Rendered to /tmp/repmgr.conf by entrypoint.sh (@...@ placeholders).
+# https://www.repmgr.org/docs/current/configuration-file-settings.html
+# https://www.repmgr.org/docs/current/repmgrd-basic-configuration.html
+node_id=@NODE_ID@
+node_name='@NODE_NAME@'
+conninfo='host=@NODE_NAME@ user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/var/lib/postgresql/data'
+pg_bindir='/usr/lib/postgresql/17/bin'
+# Password file, so repmgr writes it into primary_conninfo (configuration-password-management.html).
+passfile='/tmp/pgpass'
+use_replication_slots=yes
+
+# repmgrd automatic failover (PRD 6.4): 3 attempts x 5 s, then promote.
+failover=automatic
+reconnect_attempts=3
+reconnect_interval=5
+monitor_interval_secs=2
+# pg_bindir is not applied to these two; the docs require full paths.
+promote_command='/usr/lib/postgresql/17/bin/repmgr standby promote -f /tmp/repmgr.conf'
+follow_command='/usr/lib/postgresql/17/bin/repmgr standby follow -f /tmp/repmgr.conf --upstream-node-id=%n'
+log_level=INFO
