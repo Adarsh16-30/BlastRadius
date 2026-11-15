@@ -9,3 +9,5 @@
 - Run mode: unattended, owner reviews at the end.
 - Go toolchain: go1.27.4 (current stable at setup, installed locally). Use it for go.mod, Dockerfile builder images and CI setup-go; re-check official docs per PRD section 4 version policy.
 - Docker/GHCR image names and compose project name must be lowercase (e.g. ghcr.io/adarsh16-30/blastradius-api).
+- Image tags: verify each tag exists with `docker manifest inspect <image>:<tag>` (or the registry API) before using it; record the tag in a config comment. Never use a tag from memory or search snippets alone.
+- GitHub Actions must be pinned by commit SHA by M7 (PRD section 9); the M7 evidence file must list each pinned action.
