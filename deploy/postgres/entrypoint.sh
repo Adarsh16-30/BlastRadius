@@ -97,6 +97,14 @@ clone_standby() {
 # Fencing (PRD 6.4 step 3): the peer is primary and this node was one too, so rewind and follow.
 rejoin() {
   log "peer $PEER_HOST is primary: rejoining as standby"
+  # pg_is_in_recovery() flips about a second before `repmgr standby promote` updates
+  # repmgr.nodes; node rejoin fails until the peer is also registered as primary.
+  local tries=0
+  until [ "$(psql "$PEER" -XAtc "SELECT count(*) FROM repmgr.nodes WHERE node_name = '$PEER_HOST' AND type = 'primary' AND active" 2>/dev/null)" = 1 ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 30 ] || break
+    sleep 1
+  done
   if ! repmgr -f "$CONF" -d "$PEER" node rejoin --force-rewind --config-files=postgresql.conf --verbose; then
     log "rejoin failed: falling back to a full re-clone"
     pg_ctl -D "$PGDATA" -m immediate -w stop >/dev/null 2>&1 || true
@@ -105,6 +113,9 @@ rejoin() {
 }
 
 write_config
+# After SIGKILL the old postmaster.pid can name a PID that is alive in this new container,
+# which makes postgres (and pg_rewind) refuse to start. Nothing else runs here yet.
+rm -f "$PGDATA/postmaster.pid"
 if [ ! -s "$PGDATA/global/pg_control" ]; then
   # pg_basebackup writes pg_control last, so a missing file also covers a half-finished clone.
   if [ "$PG_ROLE" = standby ]; then
@@ -125,12 +136,6 @@ elif [ "$(peer_role)" = primary ]; then
 else
   log "peer is not a primary: starting in last role (primary)"
   start_pg
-  # The peer's repmgrd may have been mid-promotion while we checked; look once more.
-  sleep 5
-  if [ "$(peer_role)" = primary ]; then
-    pg_ctl -D "$PGDATA" -m fast -w stop
-    rejoin
-  fi
 fi
 
 if [ "$(psql -XAtU repmgr -d repmgr -c 'SELECT pg_is_in_recovery()')" = t ]; then
@@ -139,13 +144,33 @@ if [ "$(psql -XAtU repmgr -d repmgr -c 'SELECT pg_is_in_recovery()')" = t ]; the
     "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE NOT active AND slot_type = 'physical'"
 fi
 
-repmgrd -f "$CONF" --daemonize=false --no-pid-file &
-rpid=$!
+# True when both nodes are primary and this one must yield: the older timeline loses, and on
+# equal timelines the higher node name does. Both nodes evaluate the same rule, so exactly one
+# yields. Covers the races the start-up check cannot see (peer promoted, or both booted,
+# while this node was starting).
+lost_split_brain() {
+  [ ! -f "$PGDATA/standby.signal" ] || return 1
+  local tl="SELECT substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8)" mine theirs
+  theirs=$(psql "$PEER" -XAtc "$tl" 2>/dev/null) || return 1 # fails while the peer is down or a standby
+  mine=$(psql -XAtU repmgr -d repmgr -c "$tl" 2>/dev/null) || return 1
+  [[ -n $mine && -n $theirs ]] || return 1
+  [[ $mine < $theirs || ($mine == "$theirs" && $NODE_NAME > $PEER_HOST) ]]
+}
+
 touch "$READY"
 log "ready"
-while kill -0 "$rpid" 2>/dev/null && pg_ctl -D "$PGDATA" status >/dev/null 2>&1; do
+while pg_ctl -D "$PGDATA" status >/dev/null 2>&1; do
+  # repmgrd exits when its upstream is down at start-up, so keep restarting it.
+  if [ -z "$rpid" ] || ! kill -0 "$rpid" 2>/dev/null; then
+    repmgrd -f "$CONF" --daemonize=false --no-pid-file &
+    rpid=$!
+  fi
+  if lost_split_brain; then
+    log "two primaries: this node yields and will rejoin on restart"
+    stop 1
+  fi
   sleep 2 &
   wait $!
 done
-log "postgres or repmgrd exited"
+log "postgres exited"
 stop 1

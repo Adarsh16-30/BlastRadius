@@ -61,7 +61,7 @@ x-pg: &pg
   stop_grace_period: 30s # entrypoint runs `pg_ctl stop -m fast` on SIGTERM
   tmpfs: ["/tmp:size=16m", "/run/postgresql:size=1m"]
   healthcheck: # /tmp/ready: roles exist and the node is registered with repmgr
-    test: ["CMD-SHELL", "test -f /tmp/ready && pg_isready -q -h 127.0.0.1 -d blastradius"]
+    test: ["CMD-SHELL", "test -f /tmp/ready && pg_isready -q -U probe -d blastradius"]
     interval: 5s
     timeout: 3s
     retries: 3
@@ -149,9 +149,7 @@ services:
       PEER_HOST: pg1
       PG_ROLE: standby
     volumes: ["pg2-data:/var/lib/postgresql/data"]
-    # Start order is the tie-break when both nodes boot together and neither is a standby.
-    depends_on:
-      pg1: { condition: service_healthy }
+    # No depends_on between the nodes: after a failover pg1 is the standby and must not gate pg2.
   prometheus: # target: prom/prometheus 3.15.1
     <<: *base
     mem_limit: 160m

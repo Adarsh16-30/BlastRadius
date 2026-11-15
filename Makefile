@@ -2,7 +2,7 @@ COMPOSE := docker compose -f deploy/compose.yaml --env-file $(or $(wildcard .env
 COMPOSE_PROJECT := blastradius
 GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint),$(shell go env GOPATH)/bin/golangci-lint)
 
-.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest pgstatus
+.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest pgstatus failover-drill
 
 up:
 	$(COMPOSE) up -d --wait
@@ -33,6 +33,10 @@ stats:
 # Role and replica lag of both Postgres nodes through a SQL probe; fails unless exactly one primary.
 pgstatus:
 	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) bash scripts/pgstatus.sh
+
+# By-hand failover check: kill the primary, time promotion and rejoin (docs/runbook.md).
+failover-drill:
+	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) bash scripts/failover-drill.sh
 
 # Integration tests against the running primary (needs `make up`). Uses a separate blastradius_test
 # database and the container's bridge IP, so no extra port is published (PRD 9).
