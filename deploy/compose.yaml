@@ -1,7 +1,10 @@
-# M0 skeleton. Every service runs a pinned busybox placeholder; the target image is
+# Services not yet built still run a pinned busybox placeholder; the target image is
 # named in each comment and swapped in by the milestone that owns it.
-# Target versions come from a web search and are NOT yet verified against registries
-# (see docs/QUESTIONS.md); verify against official docs before swapping them in.
+# M1 swapped in real images for haproxy, api1/api2, toxiproxy, pg1 and k6. Tags were each
+# checked with `docker manifest inspect` on 2026-11-15:
+#   postgres:17.9-alpine3.23  haproxy:3.4.7-alpine3.24  ghcr.io/shopify/toxiproxy:2.13.0
+#   grafana/k6:2.4.0          golang:1.27.4-alpine3.24 (API builder, deploy/api/Dockerfile)
+# Placeholder targets (prometheus, grafana, ...) are still unverified (docs/QUESTIONS.md).
 name: blastradius
 
 x-base: &base
@@ -18,34 +21,121 @@ x-base: &base
     timeout: 3s
     retries: 3
 
+x-api: &api
+  <<: *base
+  image: ghcr.io/adarsh16-30/blastradius-api:dev
+  build:
+    context: ..
+    dockerfile: deploy/api/Dockerfile
+  command: []
+  user: "65532:65532"
+  environment:
+    DB_HOSTS: toxiproxy:15432,toxiproxy:15433 # both application pools go through Toxiproxy (PRD 6.6)
+    DB_NAME: blastradius
+    DB_USER: app
+    DB_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+    CHAOS_ENABLED: ${CHAOS_ENABLED:-false}
+    GOMEMLIMIT: 48MiB # 75% of mem_limit (PRD 2)
+  healthcheck:
+    test: ["CMD", "/api", "healthcheck"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    toxiproxy: { condition: service_healthy }
+  mem_limit: 64m
+  mem_reservation: 32m
+  pids_limit: 64
+
 services:
-  haproxy: # target: haproxy 3.4.7 (LTS)
+  haproxy:
     <<: *base
+    image: haproxy:3.4.7-alpine3.24
+    command: ["haproxy", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+    volumes: ["./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"]
     ports: ["127.0.0.1:8080:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8404/haproxy-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      api1: { condition: service_healthy }
+      api2: { condition: service_healthy }
     mem_limit: 32m
     mem_reservation: 16m
     pids_limit: 64
-  api1: # target: ghcr.io/adarsh16-30/blastradius-api (M1)
-    <<: *base
-    mem_limit: 64m
-    mem_reservation: 32m
-    pids_limit: 64
+  api1:
+    <<: *api
   api2:
+    <<: *api
+  migrate: # one-shot: applies db/migrations as the migrator role, then exits
+    <<: *api
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      MIGRATE_DB_HOST: pg1:5432 # direct, not via Toxiproxy: faults must not hit migrations
+      MIGRATE_DB_USER: migrator
+      MIGRATE_DB_PASSWORD: ${MIGRATOR_PASSWORD:?set MIGRATOR_PASSWORD in .env}
+      DB_NAME: blastradius
+    healthcheck:
+      test: ["CMD", "/api", "version"] # shortcut: exits immediately, the check only satisfies the every-service rule
+    depends_on:
+      pg1: { condition: service_healthy }
+    mem_limit: 32m
+    mem_reservation: 16m
+  toxiproxy:
     <<: *base
-    mem_limit: 64m
-    mem_reservation: 32m
-    pids_limit: 64
-  toxiproxy: # target: ghcr.io/shopify/toxiproxy 2.x
-    <<: *base
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    command: ["-host=0.0.0.0", "-config=/config/proxies.json"]
+    volumes: ["./toxiproxy/proxies.json:/config/proxies.json:ro"]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
     mem_limit: 32m
     mem_reservation: 16m
     pids_limit: 64
-  pg1: # target: custom postgres:17 + repmgr + pgBackRest (M2)
+  pg1: # M2 replaces this with the repmgr + pgBackRest image
     <<: *base
+    image: postgres:17.9-alpine3.23
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - max_connections=30
+    user: "70:70" # postgres uid in the alpine image; volume ownership comes from the image
+    environment:
+      POSTGRES_DB: blastradius
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD in .env}
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?set MIGRATOR_PASSWORD in .env}
+      PROBE_PASSWORD: ${PROBE_PASSWORD:?set PROBE_PASSWORD in .env}
+    volumes:
+      - pg1-data:/var/lib/postgresql/data
+      - ./postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro
+    tmpfs: ["/tmp", "/var/run/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d blastradius"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
     mem_limit: 256m
     mem_reservation: 128m
     pids_limit: 128
-  pg2:
+  pg2: # target: same custom image as pg1 (M2)
     <<: *base
     mem_limit: 256m
     mem_reservation: 128m
@@ -78,9 +168,25 @@ services:
     mem_limit: 64m
     mem_reservation: 32m
     pids_limit: 64
-  k6: # target: grafana/k6 2.1.0
+  k6: # run with: make baseline  (docker compose run --rm k6 run /load/steady.js)
     <<: *base
+    image: grafana/k6:2.4.0
     profiles: [chaos]
+    entrypoint: ["k6"]
+    command: ["version"]
+    user: "12345:12345"
+    volumes: ["../load:/load:ro"]
+    environment:
+      BASE_URL: http://haproxy:8080
+    healthcheck:
+      test: ["CMD", "k6", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: "no"
     mem_limit: 128m
     mem_reservation: 64m
     pids_limit: 64
+
+volumes:
+  pg1-data:

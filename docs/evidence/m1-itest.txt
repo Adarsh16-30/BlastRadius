@@ -1,0 +1,13 @@
+set -a; . ./.env; set +a; \
+ip=$(docker inspect blastradius-pg1-1 | jq -r '.[0].NetworkSettings.Networks[].IPAddress'); \
+docker exec blastradius-pg1-1 psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname='blastradius_test'" | grep -q 1 || \
+  docker exec blastradius-pg1-1 psql -U postgres -c 'CREATE DATABASE blastradius_test'; \
+TEST_DATABASE_URL="postgres://postgres:$POSTGRES_PASSWORD@$ip:5432/blastradius_test" go test -race -cover -count=1 ./...
+ok  	github.com/Adarsh16-30/BlastRadius/cmd/api	1.012s	coverage: 26.3% of statements
+ok  	github.com/Adarsh16-30/BlastRadius/cmd/blast	1.009s	coverage: 83.3% of statements
+?   	github.com/Adarsh16-30/BlastRadius/db/migrations	[no test files]
+ok  	github.com/Adarsh16-30/BlastRadius/internal/api	1.068s	coverage: 93.0% of statements
+?   	github.com/Adarsh16-30/BlastRadius/internal/chaos	[no test files]
+?   	github.com/Adarsh16-30/BlastRadius/internal/scorecard	[no test files]
+?   	github.com/Adarsh16-30/BlastRadius/internal/seqwriter	[no test files]
+ok  	github.com/Adarsh16-30/BlastRadius/internal/store	1.326s	coverage: 82.9% of statements

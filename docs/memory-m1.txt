@@ -1,0 +1,11 @@
+CONTAINER ID   NAME                              CPU %     MEM USAGE / LIMIT   MEM %     NET I/O           BLOCK I/O        PIDS
+33bc6d3d4f31   blastradius-k6-run-1cc1acda2618   2.71%     22.37MiB / 128MiB   17.48%    4.25MB / 1.24MB   5.68MB / 0B      20
+51ceea9e5aee   blastradius-api2-1                1.15%     8.543MiB / 64MiB    13.35%    1.84MB / 2.75MB   0B / 0B          12
+c814397e685b   blastradius-api1-1                1.13%     8.781MiB / 64MiB    13.72%    1.88MB / 2.82MB   0B / 0B          12
+697dd5334210   blastradius-haproxy-1             1.36%     25.86MiB / 32MiB    80.80%    5.57MB / 5.54MB   1.36MB / 0B      17
+6dea82f29bdd   blastradius-pg1-1                 1.19%     75.62MiB / 256MiB   29.54%    3.73MB / 7.1MB    38.6MB / 127MB   12
+86936d5c6f31   blastradius-prometheus-1          0.00%     432KiB / 160MiB     0.26%     4.69kB / 126B     0B / 0B          1
+2634ba990b80   blastradius-grafana-1             0.00%     460KiB / 192MiB     0.23%     4.81kB / 126B     94.2kB / 0B      1
+8f99d64386bb   blastradius-pg2-1                 0.00%     3.062MiB / 256MiB   1.20%     4.97kB / 126B     3.39MB / 0B      1
+7f9fdf9417f8   blastradius-dockerproxy-1         0.00%     440KiB / 32MiB      1.34%     4.73kB / 126B     0B / 0B          1
+36a58e8991f5   blastradius-toxiproxy-1           7.94%     23.85MiB / 32MiB    74.52%    10.7MB / 10.7MB   22.1MB / 0B      14

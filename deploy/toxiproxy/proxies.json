@@ -1,0 +1,4 @@
+[
+  { "name": "pg1", "listen": "0.0.0.0:15432", "upstream": "pg1:5432", "enabled": true },
+  { "name": "pg2", "listen": "0.0.0.0:15433", "upstream": "pg2:5432", "enabled": true }
+]

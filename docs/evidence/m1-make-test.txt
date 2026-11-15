@@ -1,0 +1,12 @@
+go vet ./...
+/home/adars/go/bin/golangci-lint run ./...
+0 issues.
+go test -race ./...
+ok  	github.com/Adarsh16-30/BlastRadius/cmd/api	1.014s
+ok  	github.com/Adarsh16-30/BlastRadius/cmd/blast	(cached)
+?   	github.com/Adarsh16-30/BlastRadius/db/migrations	[no test files]
+ok  	github.com/Adarsh16-30/BlastRadius/internal/api	1.035s
+?   	github.com/Adarsh16-30/BlastRadius/internal/chaos	[no test files]
+?   	github.com/Adarsh16-30/BlastRadius/internal/scorecard	[no test files]
+?   	github.com/Adarsh16-30/BlastRadius/internal/seqwriter	[no test files]
+ok  	github.com/Adarsh16-30/BlastRadius/internal/store	1.011s
