@@ -33,9 +33,9 @@ for m in "${ALL[@]}"; do
   [ "$run" = 1 ] || continue
   if git rev-parse -q --verify "refs/tags/done-$m" >/dev/null; then echo "skip $m (tagged)"; continue; fi
 
-  passed=0
+  passed=0; tier=1
   for try in $(seq 1 "$MAX_TRIES"); do
-    MODEL=$(pick "$m" "$try")
+    MODEL=$(pick "$m" "$tier")
     echo "== $m attempt $try/$MAX_TRIES on $MODEL =="
     echo "$MODEL" > ".autorun/$m-$try.model"
     PROMPT=$(cat <<PROMPT_EOF
@@ -45,13 +45,16 @@ You are running unattended. Milestone $m of docs/PRD.md section 11; attempt $try
 3. Implement every acceptance criterion for $m, using the skills and agents CLAUDE.md maps to $m.
 4. Run the milestone's commands. Paste each command and its real output into docs/evidence/$m.md.
 5. If a target is missed, report the measured value and cause; do not loosen it. If you cannot proceed, write docs/BLOCKED.md and stop.
-6. Append a handoff to docs/PROGRESS.md, then commit with a message starting "$m:". Leave the working tree clean.
+6. Commit after each stage of the work, not only at the end, so progress survives an early stop.
+7. Append a handoff to docs/PROGRESS.md, then commit with a message starting "$m:". Leave the working tree clean.
 PROMPT_EOF
 )
-    claude -p "$PROMPT" --model "$MODEL" $MCP_FLAGS --permission-mode acceptEdits --max-turns 150 --output-format json \
-      > ".autorun/$m-$try.json" 2> ".autorun/$m-$try.err" || echo "claude exited non-zero (see .autorun/$m-$try.err)" >&2
+    rc=0
+    claude -p "$PROMPT" --model "$MODEL" $MCP_FLAGS --permission-mode acceptEdits --max-turns 400 --output-format json \
+      > ".autorun/$m-$try.json" 2> ".autorun/$m-$try.err" || { rc=$?; echo "claude exited $rc (see .autorun/$m-$try.err)" >&2; }
     if scripts/gate.sh "$m" > ".autorun/$m-$try.gate" 2>&1; then passed=1; break; fi
     tail -5 ".autorun/$m-$try.gate"
+    [ "$rc" = 0 ] && tier=$((tier + 1))
   done
 
   [ "$passed" = 1 ] || { echo "STOP: $m failed $MAX_TRIES attempts. See .autorun/ and docs/BLOCKED.md" >&2; exit 1; }
