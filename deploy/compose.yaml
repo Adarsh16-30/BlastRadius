@@ -2,7 +2,7 @@
 # named in each comment and swapped in by the milestone that owns it.
 # M1 swapped in real images for haproxy, api1/api2, toxiproxy and k6; M2 for pg1/pg2. Tags were
 # each checked with `docker manifest inspect` on 2026-11-15:
-#   postgres:17.9-bookworm (deploy/postgres/Dockerfile)  haproxy:3.4.7-alpine3.24  ghcr.io/shopify/toxiproxy:2.13.0
+#   postgres:17.12-bookworm (deploy/postgres/Dockerfile, 2026-11-16)  haproxy:3.4.7-alpine3.24  ghcr.io/shopify/toxiproxy:2.13.0
 #   grafana/k6:2.4.0          golang:1.27.4-alpine3.24 (API builder, deploy/api/Dockerfile)
 # Placeholder targets (prometheus, grafana, ...) are still unverified (docs/QUESTIONS.md).
 name: blastradius
@@ -50,7 +50,7 @@ x-api: &api
   pids_limit: 64
 
 # One image for both nodes (deploy/postgres); they differ only by environment (PRD 6.4).
-# Base postgres:17.9-bookworm verified with `docker manifest inspect` on 2026-11-15.
+# Base postgres:17.12-bookworm verified with `docker manifest inspect` on 2026-11-16.
 x-pg: &pg
   <<: *base
   image: ghcr.io/adarsh16-30/blastradius-postgres:dev

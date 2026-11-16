@@ -1,0 +1,33 @@
+== primary is pg2; killing it and leaving it down
+ Container blastradius-pg2-1 Killing 
+ Container blastradius-pg2-1 Killed 
+pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
+pg2 unreachable
+primaries=1
+== writing a row through the API on the new primary pg1
+== stopping pg1, then starting only the stale pg2
+ Container blastradius-pg1-1 Stopping 
+ Container blastradius-pg1-1 Stopped 
+ Container blastradius-pg2-1 Starting 
+ Container blastradius-pg2-1 Started 
+pg1 unreachable
+pg2 primary  standbys(name,state,lag_bytes,replay_lag_s): none
+primaries=1
+== starting pg1 (newer timeline); pg2 must yield and rejoin
+ Container blastradius-pg1-1 Starting 
+ Container blastradius-pg1-1 Started 
+pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): pg2,streaming,0,0.001731
+pg2 standby  receiver=streaming lag_seconds=0
+primaries=1
+== entrypoint decisions
+entrypoint[pg1]: stopping
+entrypoint[pg1]: peer pg2 is primary on an older timeline: starting as primary, the peer will yield
+entrypoint[pg1]: ready
+entrypoint[pg2]: peer is not a primary: starting in last role (primary)
+entrypoint[pg2]: ready
+entrypoint[pg2]: two primaries: this node yields and will rejoin on restart
+entrypoint[pg2]: stopping
+entrypoint[pg2]: peer pg1 is primary: rejoining as standby
+entrypoint[pg2]: ready
+== row written after the failover: {"seqs":[1],"writer_id":"stale-drill-1794813820"}
+== result: PASS (pg1 kept the primary role, pg2 rejoined, row survived)

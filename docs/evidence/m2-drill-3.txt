@@ -1,48 +1,42 @@
-== primary is pg2; killing it with SIGKILL
- Container blastradius-pg2-1 Killing 
- Container blastradius-pg2-1 Killed 
-19:13:51 pg1 standby  receiver=down lag_seconds=0
-19:13:51 pg2 unreachable
-19:13:51 primaries=0
-19:13:52 pg1 standby  receiver=down lag_seconds=0
-19:13:52 pg2 unreachable
-19:13:52 primaries=0
-19:13:54 pg1 standby  receiver=down lag_seconds=0
-19:13:54 pg2 unreachable
-19:13:54 primaries=0
-19:13:56 pg1 standby  receiver=down lag_seconds=0
-19:13:56 pg2 unreachable
-19:13:56 primaries=0
-19:13:57 pg1 standby  receiver=down lag_seconds=0
-19:13:57 pg2 unreachable
-19:13:57 primaries=0
-19:13:59 pg1 standby  receiver=down lag_seconds=0
-19:13:59 pg2 unreachable
-19:13:59 primaries=0
-19:14:01 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:01 pg2 unreachable
-19:14:01 primaries=1
-== pg1 promoted 11.5 s after the kill
-== pg2 container state after kill: exited restarts=0
-== starting pg2 again
- Container blastradius-pg2-1 Starting 
- Container blastradius-pg2-1 Started 
-19:14:02 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:02 pg2 unreachable
-19:14:02 primaries=1
-19:14:04 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:04 pg2 unreachable
-19:14:04 primaries=1
-19:14:05 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:05 pg2 unreachable
-19:14:05 primaries=1
-19:14:07 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:07 pg2 unreachable
-19:14:07 primaries=1
-19:14:08 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): none
-19:14:08 pg2 unreachable
-19:14:08 primaries=1
-19:14:10 pg1 primary  standbys(name,state,lag_bytes,replay_lag_s): pg2,streaming,0,0.002443
-19:14:10 pg2 standby  receiver=streaming lag_seconds=0
-19:14:10 primaries=1
-== result: promote_seconds=11.5 rejoin_seconds=9.3 max_primaries_seen=1
+== primary is pg1; killing it with SIGKILL
+ Container blastradius-pg1-1 Killing 
+ Container blastradius-pg1-1 Killed 
+07:23:19 pg1 unreachable
+07:23:19 pg2 standby  receiver=down lag_seconds=unknown
+07:23:19 primaries=0
+07:23:21 pg1 unreachable
+07:23:21 pg2 standby  receiver=down lag_seconds=unknown
+07:23:21 primaries=0
+07:23:23 pg1 unreachable
+07:23:23 pg2 standby  receiver=down lag_seconds=unknown
+07:23:23 primaries=0
+07:23:24 pg1 unreachable
+07:23:24 pg2 standby  receiver=down lag_seconds=unknown
+07:23:24 primaries=0
+07:23:26 pg1 unreachable
+07:23:26 pg2 standby  receiver=down lag_seconds=unknown
+07:23:26 primaries=0
+07:23:28 pg1 unreachable
+07:23:28 pg2 standby  receiver=down lag_seconds=unknown
+07:23:28 primaries=0
+07:23:30 pg1 unreachable
+07:23:30 pg2 standby  receiver=down lag_seconds=unknown
+07:23:30 primaries=0
+07:23:31 pg1 unreachable
+07:23:31 pg2 primary  standbys(name,state,lag_bytes,replay_lag_s): none
+07:23:31 primaries=1
+== pg2 promoted 13.2 s after the kill
+== pg1 container state after kill: exited restarts=0
+== starting pg1 again
+ Container blastradius-pg1-1 Starting 
+ Container blastradius-pg1-1 Started 
+07:23:33 pg1 unreachable
+07:23:33 pg2 primary  standbys(name,state,lag_bytes,replay_lag_s): none
+07:23:33 primaries=1
+07:23:34 pg1 unreachable
+07:23:34 pg2 primary  standbys(name,state,lag_bytes,replay_lag_s): none
+07:23:34 primaries=1
+07:23:36 pg1 standby  receiver=streaming lag_seconds=0
+07:23:36 pg2 primary  standbys(name,state,lag_bytes,replay_lag_s): pg1,streaming,0,0.001102
+07:23:36 primaries=1
+== result: promote_seconds=13.2 rejoin_seconds=4.9 max_primaries_seen=1
