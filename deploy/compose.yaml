@@ -140,6 +140,7 @@ services:
       PEER_HOST: pg2
       PG_ROLE: primary
     volumes: ["pg1-data:/var/lib/postgresql/data"]
+    networks: { default: { ipv4_address: 172.30.77.201 } } # named in postgres/pg_hba.conf
   pg2:
     <<: *pg
     environment:
@@ -149,6 +150,7 @@ services:
       PEER_HOST: pg1
       PG_ROLE: standby
     volumes: ["pg2-data:/var/lib/postgresql/data"]
+    networks: { default: { ipv4_address: 172.30.77.202 } } # named in postgres/pg_hba.conf
     # No depends_on between the nodes: after a failover pg1 is the standby and must not gate pg2.
   prometheus: # target: prom/prometheus 3.15.1
     <<: *base

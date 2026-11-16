@@ -14,7 +14,9 @@ COPY repmgr.conf.tmpl /etc/repmgr.conf.tmpl
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Rendered at start on tmpfs; set here so `docker exec` sessions find them too.
-ENV PGPASSFILE=/tmp/pgpass \
+# PGDATA is a subdirectory of the volume so the entrypoint can keep marker files beside it.
+ENV PGDATA=/var/lib/postgresql/data/pgdata \
+    PGPASSFILE=/tmp/pgpass \
     REPMGR_CONF=/tmp/repmgr.conf
 
 USER postgres

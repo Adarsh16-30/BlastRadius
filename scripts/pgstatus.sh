@@ -21,8 +21,9 @@ for node in pg1 pg2; do
     t)
       echo "$node standby  receiver=$(probe "$node" \
         "SELECT COALESCE((SELECT status FROM pg_stat_wal_receiver), 'down')") lag_seconds=$(probe "$node" \
-        "SELECT CASE WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0
-                     ELSE COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp()), 0) END")"
+        "SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_stat_wal_receiver WHERE status = 'streaming') THEN 'unknown'
+                     WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN '0'
+                     ELSE COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp()), 0)::text END")"
       ;;
     *) echo "$node unreachable" ;;
   esac

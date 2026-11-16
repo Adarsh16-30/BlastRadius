@@ -16,6 +16,12 @@ CONF=${REPMGR_CONF:-/tmp/repmgr.conf}
 PEER="host=$PEER_HOST user=repmgr dbname=repmgr connect_timeout=3"
 READY=/tmp/ready # the healthcheck needs this file: roles exist and the node is registered
 rpid=""
+# Markers live beside PGDATA on the volume (PGDATA is a subdirectory), so they survive a wipe
+# of the data directory.
+INITIALIZED=$(dirname "$PGDATA")/.initialized # this volume has held a cluster: never initdb again
+REJOINING=$(dirname "$PGDATA")/.rejoining     # a rewind or clone did not finish: data is unusable
+# Current timeline as 8 hex digits; empty on a standby.
+TL_SQL="SELECT CASE WHEN pg_is_in_recovery() THEN '' ELSE substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8) END"
 
 log() { echo "entrypoint[$NODE_NAME]: $*"; }
 
@@ -66,18 +72,27 @@ init_primary() {
   start_pg
   # shortcut: a kill between initdb and the end of this function leaves a half-set-up node;
   # recover with `make nuke`. Add a marker file if that ever happens outside first boot.
-  psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -v repmgr_pw="$REPMGR_PASSWORD" <<'SQL'
+  # Passwords come in with \getenv (not -v, which shows in `ps`), and a failed statement is not
+  # logged, so no password can reach the container log (PRD 9).
+  psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
+SET log_min_error_statement = panic;
+\getenv repmgr_pw REPMGR_PASSWORD
 CREATE ROLE repmgr SUPERUSER REPLICATION LOGIN PASSWORD :'repmgr_pw';
 CREATE DATABASE repmgr OWNER repmgr;
 CREATE DATABASE blastradius;
+REVOKE CONNECT ON DATABASE repmgr, postgres, blastradius FROM PUBLIC;
 SQL
   # Least-privilege roles (PRD 6.4). Tables are created and owned by migrator; app gets DML only.
-  psql -X -v ON_ERROR_STOP=1 -U postgres -d blastradius \
-    -v app_pw="$APP_PASSWORD" -v mig_pw="$MIGRATOR_PASSWORD" -v probe_pw="$PROBE_PASSWORD" <<'SQL'
+  psql -X -v ON_ERROR_STOP=1 -U postgres -d blastradius <<'SQL'
+SET log_min_error_statement = panic;
+\getenv app_pw APP_PASSWORD
+\getenv mig_pw MIGRATOR_PASSWORD
+\getenv probe_pw PROBE_PASSWORD
 CREATE ROLE migrator LOGIN PASSWORD :'mig_pw';
 CREATE ROLE app      LOGIN PASSWORD :'app_pw';
 CREATE ROLE probe    LOGIN PASSWORD :'probe_pw';
 GRANT pg_monitor TO probe;
+GRANT CONNECT ON DATABASE blastradius TO app, migrator, probe;
 GRANT CREATE, USAGE ON SCHEMA public TO migrator;
 GRANT USAGE ON SCHEMA public TO app;
 ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
@@ -87,12 +102,29 @@ SQL
 }
 
 clone_standby() {
+  # Never wipe unless there is a primary to copy from; exiting leaves the decision to the next boot.
+  [ "$(peer_role)" = primary ] || { log "peer is not primary: not wiping for a clone"; exit 1; }
   log "cloning from $PEER_HOST"
+  touch "$REJOINING"
+  mkdir -p "$PGDATA"
   find "$PGDATA" -mindepth 1 -delete
   repmgr -f "$CONF" -d "$PEER" standby clone --fast-checkpoint
   start_pg
   repmgr -f "$CONF" standby register --force
+  rm -f "$REJOINING"
 }
+
+# Timeline of the stopped local cluster, 8 hex digits: the newest history file, which promotion
+# writes before the first write is accepted (timeline 1 has none).
+local_tl() {
+  local f
+  f=$(find "$PGDATA/pg_wal" -maxdepth 1 -name '*.history' -printf '%f\n' | sort | tail -n 1)
+  printf '%.8s\n' "${f:-00000001}"
+}
+
+# must_yield MINE THEIRS: with two primaries the older timeline loses, and on equal timelines
+# the higher node name does. Both nodes evaluate the same rule, so exactly one yields.
+must_yield() { [[ $1 < $2 || ($1 == "$2" && $NODE_NAME > $PEER_HOST) ]]; }
 
 # Fencing (PRD 6.4 step 3): the peer is primary and this node was one too, so rewind and follow.
 rejoin() {
@@ -105,34 +137,42 @@ rejoin() {
     [ "$tries" -lt 30 ] || break
     sleep 1
   done
+  touch "$REJOINING" # a rewind killed half-way must never be started as a primary
   if ! repmgr -f "$CONF" -d "$PEER" node rejoin --force-rewind --config-files=postgresql.conf --verbose; then
     log "rejoin failed: falling back to a full re-clone"
     pg_ctl -D "$PGDATA" -m immediate -w stop >/dev/null 2>&1 || true
     clone_standby
   fi
+  rm -f "$REJOINING"
 }
 
 write_config
 # After SIGKILL the old postmaster.pid can name a PID that is alive in this new container,
 # which makes postgres (and pg_rewind) refuse to start. Nothing else runs here yet.
 rm -f "$PGDATA/postmaster.pid"
-if [ ! -s "$PGDATA/global/pg_control" ]; then
-  # pg_basebackup writes pg_control last, so a missing file also covers a half-finished clone.
-  if [ "$PG_ROLE" = standby ]; then
+if [ ! -s "$PGDATA/global/pg_control" ] || [ -f "$REJOINING" ]; then
+  # No usable data. initdb only on a volume that never held a cluster and with no live primary
+  # next to it; otherwise the only safe source is the peer, however long it takes to appear.
+  if [ "$PG_ROLE" = primary ] && [ ! -f "$INITIALIZED" ] && [ "$(peer_role)" != primary ]; then
+    init_primary
+  else
     until [ "$(peer_role)" = primary ]; do
-      log "waiting for primary $PEER_HOST"
+      log "no usable data: waiting for primary $PEER_HOST to clone from"
       sleep 2
     done
     clone_standby
-  elif [ "$(peer_role)" = primary ]; then
-    clone_standby # never initdb a second primary next to a live one
-  else
-    init_primary
   fi
 elif [ -f "$PGDATA/standby.signal" ]; then
   start_pg
 elif [ "$(peer_role)" = primary ]; then
-  rejoin
+  # Both were primary. Rejoining unconditionally would let a stale primary that booted first
+  # make the node with the newer data rewind itself, so apply the same rule as the running check.
+  if must_yield "$(local_tl)" "$(psql "$PEER" -XAtc "$TL_SQL" 2>/dev/null || true)"; then
+    rejoin
+  else
+    log "peer $PEER_HOST is primary on an older timeline: starting as primary, the peer will yield"
+    start_pg
+  fi
 else
   log "peer is not a primary: starting in last role (primary)"
   start_pg
@@ -144,21 +184,18 @@ if [ "$(psql -XAtU repmgr -d repmgr -c 'SELECT pg_is_in_recovery()')" = t ]; the
     "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE NOT active AND slot_type = 'physical'"
 fi
 
-# True when both nodes are primary and this one must yield: the older timeline loses, and on
-# equal timelines the higher node name does. Both nodes evaluate the same rule, so exactly one
-# yields. Covers the races the start-up check cannot see (peer promoted, or both booted,
-# while this node was starting).
+# True when both nodes are primary and this one must yield (must_yield). Covers the races the
+# start-up check cannot see (peer promoted, or both booted, while this node was starting).
 lost_split_brain() {
   [ ! -f "$PGDATA/standby.signal" ] || return 1
-  # Current timeline as 8 hex digits; empty on a standby.
-  local tl="SELECT CASE WHEN pg_is_in_recovery() THEN '' ELSE substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8) END" mine theirs
-  theirs=$(psql "$PEER" -XAtc "$tl" 2>/dev/null) || return 1 # peer down
-  mine=$(psql -XAtU repmgr -d repmgr -c "$tl" 2>/dev/null) || return 1
+  local mine theirs
+  theirs=$(psql "$PEER" -XAtc "$TL_SQL" 2>/dev/null) || return 1 # peer down
+  mine=$(psql -XAtU repmgr -d repmgr -c "$TL_SQL" 2>/dev/null) || return 1
   [[ -n $mine && -n $theirs ]] || return 1
-  [[ $mine < $theirs || ($mine == "$theirs" && $NODE_NAME > $PEER_HOST) ]]
+  must_yield "$mine" "$theirs"
 }
 
-touch "$READY"
+touch "$INITIALIZED" "$READY"
 log "ready"
 while pg_ctl -D "$PGDATA" status >/dev/null 2>&1; do
   # repmgrd exits when its upstream is down at start-up, so keep restarting it.

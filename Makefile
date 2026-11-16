@@ -2,9 +2,10 @@ COMPOSE := docker compose -f deploy/compose.yaml --env-file $(or $(wildcard .env
 COMPOSE_PROJECT := blastradius
 GOLANGCI_LINT ?= $(or $(shell command -v golangci-lint),$(shell go env GOPATH)/bin/golangci-lint)
 
-.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest pgstatus failover-drill reclone
+.PHONY: up down nuke test chaos backup restore-drill stats public smoke baseline itest pgstatus failover-drill stale-primary-drill reclone
 
 up:
+	@test -f .env || { echo "make up: no .env; run 'cp .env.example .env' and set real passwords"; exit 1; }
 	$(COMPOSE) up -d --wait
 
 down:
@@ -38,12 +39,16 @@ pgstatus:
 failover-drill:
 	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) bash scripts/failover-drill.sh
 
+# Stale old primary boots before the node with the newer data; the newer one must win.
+stale-primary-drill:
+	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) bash scripts/stale-primary-drill.sh
+
 # Full re-clone of one node: empty its data directory and start it; the entrypoint clones from
 # the peer when the peer is primary. Usage: make reclone NODE=pg1
 reclone:
 	@case "$(NODE)" in pg1|pg2) ;; *) echo "usage: make reclone NODE=pg1|pg2"; exit 1 ;; esac
 	$(COMPOSE) stop $(NODE)
-	$(COMPOSE) run --rm --no-deps --entrypoint find $(NODE) /var/lib/postgresql/data -mindepth 1 -delete
+	$(COMPOSE) run --rm --no-deps --entrypoint rm $(NODE) -rf /var/lib/postgresql/data/pgdata
 	$(COMPOSE) start $(NODE)
 
 # Integration tests against the running primary (needs `make up`). Uses a separate blastradius_test
