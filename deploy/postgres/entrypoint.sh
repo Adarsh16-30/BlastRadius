@@ -150,8 +150,9 @@ fi
 # while this node was starting).
 lost_split_brain() {
   [ ! -f "$PGDATA/standby.signal" ] || return 1
-  local tl="SELECT substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8)" mine theirs
-  theirs=$(psql "$PEER" -XAtc "$tl" 2>/dev/null) || return 1 # fails while the peer is down or a standby
+  # Current timeline as 8 hex digits; empty on a standby.
+  local tl="SELECT CASE WHEN pg_is_in_recovery() THEN '' ELSE substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8) END" mine theirs
+  theirs=$(psql "$PEER" -XAtc "$tl" 2>/dev/null) || return 1 # peer down
   mine=$(psql -XAtU repmgr -d repmgr -c "$tl" 2>/dev/null) || return 1
   [[ -n $mine && -n $theirs ]] || return 1
   [[ $mine < $theirs || ($mine == "$theirs" && $NODE_NAME > $PEER_HOST) ]]
